@@ -209,6 +209,8 @@ def view_changesets(request, changesets, model_class, oid: int):
 	data = []
 	userids = set()
 	diff_tracker = dict()
+	# Prefetch related changes to avoid N+1 queries
+	changesets = changesets.prefetch_related('changes')
 	for cs in changesets:
 		changes = []
 		for c in cs.changes.order_by('model', 'oid', 'field'):
@@ -229,6 +231,8 @@ def view_changesets(request, changesets, model_class, oid: int):
 
 def view_changesets_debug(request, changesets):
 	body = ['<html>', '<head>', '<style type="text/css">td {padding: 0px 20px;} th {padding: 0px 20px;}</style>', '</head>', '<body>']
+	# Prefetch related changes and user to avoid N+1 queries
+	changesets = changesets.prefetch_related('changes').select_related('user')
 	for cs in changesets:
 		username = cs.user.username if cs.user else None
 		body.append('<h3>Changeset {} by {}: {} on {} {{{}}}'.format(cs.id, cs.source, username, cs.date.strftime('%Y-%m-%d %H:%M:%S'), cs.uuid))
