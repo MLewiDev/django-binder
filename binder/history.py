@@ -146,7 +146,6 @@ def m2m_diff(old, new):
 
 
 
-# FIXME: use bulk inserts for efficiency.
 def _commit():
 	# Fill in the deferred m2ms
 	for (model, oid, field), (old, new, diff) in _Transaction.changes.items():
@@ -172,13 +171,15 @@ def _commit():
 	)
 	changeset.save()
 
+	# Use bulk_create for performance - create all Change objects at once
+	changes_to_create = []
 	for (model, oid, field), (old, new, diff) in _Transaction.changes.items():
 		# New instances get None for all the before values
 		if old is NewInstanceField:
 			old = None
 
-		# Actually record the change
-		change = Change(
+		# Prepare the change object
+		changes_to_create.append(Change(
 			changeset=changeset,
 			model=model.__name__,
 			oid=oid,
@@ -186,8 +187,10 @@ def _commit():
 			diff=diff,
 			before=jsondumps(old),
 			after=jsondumps(new),
-		)
-		change.save()
+		))
+
+	# Bulk insert all changes in a single query
+	Change.objects.bulk_create(changes_to_create)
 
 	transaction_commit.send(sender=None, changeset=changeset)
 
