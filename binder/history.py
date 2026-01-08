@@ -146,7 +146,6 @@ def m2m_diff(old, new):
 
 
 
-# FIXME: use bulk inserts for efficiency.
 def _commit():
 	# Fill in the deferred m2ms
 	for (model, oid, field), (old, new, diff) in _Transaction.changes.items():
@@ -172,13 +171,15 @@ def _commit():
 	)
 	changeset.save()
 
+	# Use bulk_create for performance - create all Change objects at once
+	changes_to_create = []
 	for (model, oid, field), (old, new, diff) in _Transaction.changes.items():
 		# New instances get None for all the before values
 		if old is NewInstanceField:
 			old = None
 
-		# Actually record the change
-		change = Change(
+		# Prepare the change object
+		changes_to_create.append(Change(
 			changeset=changeset,
 			model=model.__name__,
 			oid=oid,
@@ -186,8 +187,10 @@ def _commit():
 			diff=diff,
 			before=jsondumps(old),
 			after=jsondumps(new),
-		)
-		change.save()
+		))
+
+	# Bulk insert all changes in a single query
+	Change.objects.bulk_create(changes_to_create)
 
 	transaction_commit.send(sender=None, changeset=changeset)
 
@@ -206,6 +209,8 @@ def view_changesets(request, changesets, model_class, oid: int):
 	data = []
 	userids = set()
 	diff_tracker = dict()
+	# Prefetch related changes to avoid N+1 queries
+	changesets = changesets.prefetch_related('changes')
 	for cs in changesets:
 		changes = []
 		for c in cs.changes.order_by('model', 'oid', 'field'):
@@ -226,6 +231,8 @@ def view_changesets(request, changesets, model_class, oid: int):
 
 def view_changesets_debug(request, changesets):
 	body = ['<html>', '<head>', '<style type="text/css">td {padding: 0px 20px;} th {padding: 0px 20px;}</style>', '</head>', '<body>']
+	# Prefetch related changes and user to avoid N+1 queries
+	changesets = changesets.prefetch_related('changes').select_related('user')
 	for cs in changesets:
 		username = cs.user.username if cs.user else None
 		body.append('<h3>Changeset {} by {}: {} on {} {{{}}}'.format(cs.id, cs.source, username, cs.date.strftime('%Y-%m-%d %H:%M:%S'), cs.uuid))
